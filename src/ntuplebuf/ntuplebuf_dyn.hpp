@@ -15,8 +15,10 @@ almost all data types
 
 namespace ntuplebuf {
 
-
-template<typename ControlCodeT, unsigned NBUFS>  // ToDo:  + panic/warning handler?
+/**
+ * Buffer data as byte array (typeless)
+ */
+template<typename ControlCodeT, unsigned NBUFS>
 struct NTupleBufferDynAlloc
 {
     typedef int errcode_t;
@@ -97,6 +99,10 @@ protected:
 };
 
 
+/**
+ * Buffer data as type.
+ * The type shall be default constructible
+ */
 template<typename ControlCodeT, unsigned NBUFS, typename DataT>
 struct NTupleBufferDynAllocTyped
     : public NTupleBufferDynAlloc<ControlCodeT, NBUFS>
@@ -104,14 +110,16 @@ struct NTupleBufferDynAllocTyped
     typedef NTupleBufferDynAlloc<ControlCodeT, NBUFS> Base;
     typedef typename Base::errcode_t errcode_t;
 
-    NTupleBufferDynAllocTyped(){
-        for(int i=0 ; i < NBUFS; ++i){
+    NTupleBufferDynAllocTyped()
+    : Base(sizeof(DataT))
+    {
+        for(unsigned i=0 ; i < NBUFS; ++i){
             new(Base::data_ + i * Base::sz1buf_) DataT; // call placement new
         }
     }
 
     ~NTupleBufferDynAllocTyped(){
-        for(int i=0 ; i < NBUFS; ++i){
+        for(unsigned i=0 ; i < NBUFS; ++i){
             ((DataT*)(void*)(Base::data_ + i * Base::sz1buf_)) -> DataT::~DataT(); // placement destruct
         }
     }

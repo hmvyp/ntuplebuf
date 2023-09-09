@@ -10,6 +10,7 @@
 #include <iostream>
 #include <thread>
 #include <mutex>
+#include <string>
 
 
 struct NtbTesBase{
@@ -22,8 +23,44 @@ struct NtbTesBase{
     }
 };
 
+struct DataBase{
+    unsigned count = 0;
+    static void printInstancesCounter(){};
+};
 
-template <typename ControlCodeT, unsigned NConsumers>
+
+struct Data
+: public DataBase{
+
+    Data()
+    {
+        ninstances ++;
+    }
+
+    ~Data(){
+        ninstances --;
+    }
+
+
+    static std::atomic<unsigned> ninstances;
+
+    static void printInstancesCounter(){
+        NtbTesBase::under_lock([=](){
+            std::cout << (
+                    std::string("\n instances counter: ")
+                    + std::to_string(Data::ninstances.load())
+                    + "\n\n"
+            );
+        });
+    }
+
+
+};
+
+std::atomic<unsigned> Data::ninstances;
+
+
+template <typename ControlCodeT, unsigned NConsumers, typename DataT>
 struct NtbTestMT
         : public NtbTesBase
 {
@@ -42,16 +79,33 @@ struct NtbTestMT
     : prod_cycles_(cycles), pm_(pm), cm_(cm)
     {}
 
-    struct Data{
-        unsigned count;
-    };
+    ~NtbTestMT()
+    {
+        DataT::printInstancesCounter();
+        /*
+        under_lock([=](){
+            std::cout << (
+                    std::string("\n instances counter: ")
+                    + std::to_string(Data::ninstances.load())
+                    + "\n\n\n"
+            );
+        });
+        */
+    }
 
     void start(){
 
         under_lock([=](){
-            std::cout << "\n\n===== staring test ====== consumers: " << NConsumers
-                    <<"   cycles: " << prod_cycles_ << "   pm: " << pm_ << "   cm: " << cm_ << "\n";
+            std::cout << (
+                    std::string("\n\n===== staring test ====== consumers: ") + std::to_string(NConsumers)
+                    + "   cycles: " + std::to_string(prod_cycles_)
+                    + "   pm: " + std::to_string(pm_)
+                    + "   cm: " + std::to_string(cm_) + "\n"
+                    //+ "data instances counter: " + std::to_string(Data::ninstances.load()) + "\n"
+            );
         });
+
+        DataT::printInstancesCounter();
 
         std::thread cons_threads[NConsumers];
         for(unsigned i = 0; i < NConsumers; ++i){
@@ -66,10 +120,10 @@ struct NtbTestMT
     }
 
     void consumer(int consNo){
-        Data* p = nullptr;
+        DataT* p = nullptr;
 
         while(!stop_.load()){
-            auto res = nbc.start_reading((void**)&p);
+            auto res = nbc.start_reading(&p);
             if(res < 0){
                 under_lock([=](){
                 std::cout << "** Read error consNo: " << consNo << "  error: " << res << "\n";
@@ -94,10 +148,10 @@ struct NtbTestMT
 
                 switch(cm_){
                 case FREE:
-                    res = nbc.free((void**)&p);
+                    res = nbc.free(&p);
                     break;
                 case CONSUME:
-                    res = nbc.consume((void**)&p);
+                    res = nbc.consume(&p);
                     break;
                 case C_SIMPLE:
                 default:
@@ -116,10 +170,10 @@ struct NtbTestMT
 
     void producer(){
         unsigned count = 10;
-        Data* p = nullptr;
+        DataT* p = nullptr;
 
         for(unsigned i = 0; i < prod_cycles_; ++i){
-            auto res = nbc.start_writing((void**)&p);
+            auto res = nbc.start_writing(&p);
             if(res < 0){
                 std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
                 break;
@@ -133,7 +187,7 @@ struct NtbTestMT
             }
 
             if(pm_ == COMMIT){
-                res = nbc.commit((void**)&p);
+                res = nbc.commit(&p);
                 if(res < 0){
                     under_lock([=](){
                     std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
@@ -161,7 +215,7 @@ struct NtbTestMT
 
 private:
 
-    ntuplebuf::NTupleBufferDynAlloc<ControlCodeT, NConsumers + 2> nbc = {sizeof(Data)};
+    ntuplebuf::NTupleBufferDynAllocTyped<ControlCodeT, NConsumers + 2, DataT> nbc; // = {sizeof(Data)};
 
     std::atomic<bool> stop_ = {0};
 
@@ -197,8 +251,8 @@ int ntuplebuf_test(){
     nbc.start_writing(&wb);
     nbc.start_reading(&rb);
 
-    typedef NtbTestMT<unsigned, 5> T5;
-    typedef NtbTestMT<unsigned, 1> T1;
+    typedef NtbTestMT<unsigned, 5, DataBase> T5;
+    typedef NtbTestMT<unsigned, 1, Data> T1;
 
     {
         T5 tst(20);
@@ -221,6 +275,12 @@ int ntuplebuf_test(){
         T1 tst(50, T1::P_SIMPLE, T1::CONSUME);
         tst.start();
     }
+
+    std::cout << (
+            std::string("\n\n\n ========================\n tests destroyed.  Data instances counter: ")
+            + std::to_string(Data::ninstances.load())
+            + "\n\n\n"
+    );
 
     return 0;
 }
