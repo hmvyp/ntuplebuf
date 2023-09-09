@@ -34,7 +34,9 @@ struct NTupleBufferDynAlloc
     errcode_t start_reading(void** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
         int bufnum = ptr2bufnum(*pptr);
         auto res = er(control.start_reading(&bufnum));
-        *pptr = bufnum2ptr(bufnum);
+        if(res >= 0){
+            *pptr = bufnum2ptr(bufnum);
+        }
         return res;
     }
 
@@ -59,7 +61,9 @@ struct NTupleBufferDynAlloc
     errcode_t start_writing(void** pptr){
         int bufnum = ptr2bufnum(*pptr);
         auto res = er(control.start_writing(&bufnum));
-        *pptr = bufnum2ptr(bufnum);
+        if(res >= 0){
+            *pptr = bufnum2ptr(bufnum);
+        }
         return res;
     }
 

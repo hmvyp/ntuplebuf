@@ -17,12 +17,12 @@ single integral atomic.
 #include <atomic>
 
 
-#if TEST_RACES_ntuplebuf
+#if TEST_RACES_ntuplebuf_ms
 #   include <thread>
 #   include <cstdlib>
 #   include <chrono>
 #   define  YELD_ntuplebuf std::this_thread::sleep_for(std::chrono::milliseconds( \
-        std::rand() / (RAND_MAX / 100 ) \
+        std::rand() / (RAND_MAX / TEST_RACES_ntuplebuf_ms ) \
     ));
 #else
 #   define  YELD_ntuplebuf
@@ -119,7 +119,7 @@ struct NTupleBufferControl
         int bufnum = *p_bufnum;
 
         if(bufnum_valid(bufnum) <= 0){ // if error or no data
-            return (bufnum == 0)? 0 : -1;
+            return (bufnum == 0)? 0 : -14;
         }
 
         ControlCodeT cco = cco_.load();
@@ -198,12 +198,6 @@ struct NTupleBufferControl
     start_writing(
             int* p_bufnum_working // previous bufnum (1- based) to release and fill with new
     ){
-        /*
-        int prev_bufnum = (p_bufnum_working != nullptr)? *p_bufnum_working : 0;
-        if(bufnum_valid(prev_bufnum) < 0){
-            return -31;
-        }
-        */
         if(p_bufnum_working == nullptr || bufnum_valid(*p_bufnum_working) < 0){
             return -31;
         }
@@ -214,29 +208,27 @@ struct NTupleBufferControl
         for(;;){
             ControlCodeT new_cco = cco;
 
-            int new_bufnum = find_new(new_cco);
-            if(new_bufnum < 1){
-                return 0; // not found
-            }
-
-            ControlCodeT cur_bufnum = get_current(new_cco);
-
-            inc_ref(new_cco, new_bufnum);
-
             if(prev_bufnum > 0){ // then commit previous buffer
+                ControlCodeT cur_bufnum = get_current(new_cco);
+
                 if(dec_ref(new_cco, cur_bufnum) < 0){ // deref old current
-                    return 32;
+                    return -32;
                 }
                 new_cco = set_current(new_cco, prev_bufnum);
-                // reference count for remains the same (transfered from working to recent)
+                // reference count for prev_bufnum remains the same (transfered from working to recent)
             }
+
+            int new_bufnum = find_new(new_cco);
+            if(new_bufnum < 1){
+                return -35; // not found
+            }
+
+            inc_ref(new_cco, new_bufnum);
 
             YELD_ntuplebuf
 
             if(cco_.compare_exchange_strong(cco, new_cco)){ //  weak would be sufficient?
-                if(p_bufnum_working != nullptr){
-                    *p_bufnum_working = (int)new_bufnum;
-                }
+                *p_bufnum_working = (int)new_bufnum;
                 return (int)new_bufnum;
             }
         }
@@ -273,9 +265,7 @@ struct NTupleBufferControl
             YELD_ntuplebuf
 
             if(cco_.compare_exchange_strong(cco, new_cco)){ //  weak would be sufficient?
-                if(p_bufnum_working != nullptr){
-                    *p_bufnum_working = 0; // just clear
-                }
+                *p_bufnum_working = 0; // just clear
                 return 0;
             }
         }
