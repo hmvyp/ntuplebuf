@@ -1,7 +1,7 @@
 
 Triple buffer is an implementation technique for producer-consumer pattern using shared memory without need of any data copying. The well known application of this technique is data transfer between CPU and video subsystem, but it is also very efficient for various real time (including hard real time) software systems.
 
-The main idea of triple buffer is quite simple: while producer fills the output message, consumer consumes another message (which whas «most recent» when consumer started consumption). While consuming and producing are in progress, the last already commited message remains untouched in the third message buffer (it is always ready to be consumed). Thus, three message buffers are always sufficient for 1 consumer and 1 producer (this explains the term «triple buffer»). Generally, for N participants N + 1 message buffer needed. 
+The main idea of triple buffer is quite simple: while producer fills the output message, consumer consumes another message (which was «most recent» when consumer started consumption). While consuming and producing are in progress, the last already commited message remains untouched in the third message buffer (it is always ready to be consumed). Thus, three message buffers are always sufficient for 1 consumer and 1 producer (this explains the term «triple buffer»). Generally, for N participants N + 1 message buffer needed. 
 
 The main assumptions for using triple buffer are as follows.
 
