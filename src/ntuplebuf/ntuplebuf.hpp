@@ -173,7 +173,7 @@ struct NTupleBufferControl
 
             ControlCodeT cur_bufnum = get_current(new_cco);
             if((int)cur_bufnum == bufnum){ // if cur_bufnum not changed since reading started
-                new_cco = set_current(new_cco, 0); // clear ("consume") current to prevent further reading of the same buffer
+                set_current(new_cco, 0); // clear ("consume") current to prevent further reading of the same buffer
                     // (future readers will see "no data")
 
                 count = dec_ref(new_cco, bufnum); // dereference "cleared" buffer
@@ -214,7 +214,7 @@ struct NTupleBufferControl
                 if(dec_ref(new_cco, cur_bufnum) < 0){ // deref old current
                     return -32;
                 }
-                new_cco = set_current(new_cco, prev_bufnum);
+                set_current(new_cco, prev_bufnum);
                 // reference count for prev_bufnum remains the same (transfered from working to recent)
             }
 
@@ -259,7 +259,7 @@ struct NTupleBufferControl
             if(dec_ref(new_cco, cur_bufnum) <0){
                 return -42;
             }
-            new_cco = set_current(new_cco, prev_bufnum);
+            set_current(new_cco, prev_bufnum);
             // reference count for prev_bufnum remains the same (transfered from working to recent)
 
             YELD_ntuplebuf
@@ -283,15 +283,15 @@ private:
     }
 
     ControlCodeT get_count(ControlCodeT cco, int buf_idx){return (cco >> (buf_idx * count_bitsize)) & count_mask; }
-    ControlCodeT set_count(ControlCodeT cco, int buf_idx, ControlCodeT val){
+    void set_count(ControlCodeT& cco, int buf_idx, ControlCodeT val){
         int pos = buf_idx * count_bitsize;
         ControlCodeT m = count_mask << pos;
-        return (cco & ~m) | (m & (val << pos));
+        cco = (cco & ~m) | (m & (val << pos));
     }
 
     // the 2 functions get or set 1-based number of current buffer:
     ControlCodeT get_current(ControlCodeT cco){return get_count(cco, NBUFS);}
-    ControlCodeT set_current(ControlCodeT cco, ControlCodeT val){ return set_count(cco, NBUFS, val);}
+    void set_current(ControlCodeT& cco, ControlCodeT val){ set_count(cco, NBUFS, val);}
 
     int  // returns bufnum (1-based) 0 if not found
     find_new(ControlCodeT cco){
@@ -319,7 +319,7 @@ private:
         }
 
         count++;
-        cco = set_count(cco, buf_idx, count);
+        set_count(cco, buf_idx, count);
 
         return (int) count;
     }
@@ -336,7 +336,7 @@ private:
         }
 
         count--;
-        cco = set_count(cco, buf_idx, count);
+        set_count(cco, buf_idx, count);
 
         return (int) count;
     }
