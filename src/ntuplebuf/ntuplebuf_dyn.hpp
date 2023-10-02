@@ -23,15 +23,19 @@ struct NTupleBufferDynAlloc
 {
     typedef int errcode_t;
 
-    NTupleBufferDynAlloc(size_t data_size){
+    NTupleBufferDynAlloc(size_t data_size)
+        : data_size_(data_size) // size of one buffer as passed to ctor
+    {
         size_t algn = alignof(std::max_align_t); // provide maximum alignment
-        sz1buf_ = ((data_size + algn -1) / algn) * algn; //size of one buffer
+        sz1buf_ = ((data_size + algn -1) / algn) * algn; //size of one buffer (as allocated)
         data_ = new uint8_t[NBUFS * sz1buf_](); // zero-initialized
     }
 
     ~NTupleBufferDynAlloc(){
         delete[] data_;
     }
+
+    size_t get_data_size(){ return data_size_; };
 
     errcode_t start_reading(void** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
         int bufnum = ptr2bufnum(*pptr);
@@ -93,6 +97,7 @@ protected:
             : nullptr;
     }
 
+    size_t data_size_;
     size_t sz1buf_; // size of 1 buffer
     NTupleBufferControl<ControlCodeT, NBUFS> control;
     uint8_t* data_ = nullptr;
