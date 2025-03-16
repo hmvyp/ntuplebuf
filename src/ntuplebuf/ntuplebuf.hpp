@@ -69,39 +69,29 @@ struct NTupleBufferControl
             "NBUFS too large for ControlCodeT"
     );
 
+
+   struct Transaction {
+        int errcode;
+        ControlCodeT old_buf;
+        ControlCodeT new_buf;
+    };
+
+
     int // returns positive (1-based number) on success, 0 if no data, negative on error
     start_reading(
-            int* p_bufnum_prev // pointer to previous bufnum (1- based, may be 0 if no previous data)
-                               // it will be released and  set to new bufnum
+           int* p_bufnum_prev // pointer to previous bufnum (1- based, may be 0 if no previous data)
     ){
-        ControlCodeT cco = cco_.load();
-        for(;;){
-            ControlCodeT new_cco = cco;
-            ControlCodeT cur_bufnum = get_current(new_cco);
-            if(cur_bufnum == 0){
-                return 0; // no data
-            }
-
-            if(p_bufnum_prev != nullptr && dec_ref(new_cco, *p_bufnum_prev) < 0){
-                return -3; // count overrun
-            }
-
-            if(inc_ref(new_cco, cur_bufnum) < 0){
-                return -2; // count overrun
-            }
-
-            YELD_ntuplebuf
-
-            if(cco_.compare_exchange_strong(cco, new_cco)){ //  weak would be sufficient?
-                if(p_bufnum_prev != nullptr){
-                    *p_bufnum_prev = (int)cur_bufnum;
-                }
-                return (int)cur_bufnum;
-            }
-        }
-
-        return -100;// unreachable (calm compiler warning)
+        return start_reading_impl(p_bufnum_prev, false);
     }
+
+
+    int // returns positive (1-based number) on success, 0 if no data, negative on error
+    pop(
+           int* p_bufnum_prev // pointer to previous bufnum (1- based, may be 0 if no previous data)
+    ){
+        return start_reading_impl(nullptr, true);
+    }
+
 
     // Optional function that releases the consumed buffer after reading is over.
     // Call it if you want to release the buffer before the next start_reading() call.
@@ -236,6 +226,80 @@ struct NTupleBufferControl
         return -100;// unreachable (calm compiler warning)
     }
 
+    Transaction start_transaction(){
+        Transaction rett = {-1, 0, 0};
+        ControlCodeT cco = cco_.load();
+        for(;;){
+            ControlCodeT new_cco = cco;
+
+            int old_bufnum = get_current(new_cco);
+            int new_bufnum = find_new(new_cco);
+            if(new_bufnum < 1){
+                rett.errcode = -35; // not found
+                return rett;
+            }
+
+            if(inc_ref(new_cco, new_bufnum) < 0 ||  inc_ref(new_cco, old_bufnum < 0)){
+                return -2; // count underrun
+            }
+
+            YELD_ntuplebuf
+
+            if(cco_.compare_exchange_strong(cco, new_cco)){
+                rett.errcode = 0;
+                rett.old_buf = old_bufnum;
+                rett.new_buf = new_bufnum;
+                return rett;
+            }
+        }
+
+        return rett;// unreachable (calm compiler warning)
+    }
+
+
+     int // returns 0 on success, 1 on failure, negative on error
+     commit_transaction(Transaction tra, bool force){
+        bool success = true; // optimistic
+        ControlCodeT cco = cco_.load();
+        for(;;){
+            ControlCodeT new_cco = cco;
+
+            int old_bufnum = get_current(new_cco);
+
+            if(dec_ref(new_cco, tra.old_buf) < 0){ // release tra.old_buf unconditionally
+                return -2;
+            }
+
+            if(old_bufnum != tra.old_buf){ // ABA impossible since tra.old_buf is referenced
+                if(force){
+                    if(dec_ref(new_cco, old_bufnum) < 0){// release old current if it != tra.old_buf
+                        return -2;
+                    }
+                }else{
+                    success = false;
+                }
+            }
+
+            if(success){
+                set_current(new_cco, tra.new_buf); // keep new buffer referenced and set it as current
+            }else{
+                // otherwise release new buffer (it is garbage on failure):
+                if(dec_ref(new_cco, tra.new_buf) < 0){
+                    return -2;
+                }
+            }
+
+            YELD_ntuplebuf
+
+            if(cco_.compare_exchange_strong(cco, new_cco)){
+                return success? 0 : 1;
+            }
+        }
+
+        return 1;// unreachable (calm compiler warning)
+    }
+
+
     int // returns 0 on success, negative on error
     commit(
             int* p_bufnum_working //  bufnum (1- based) to release and to fill with new
@@ -276,6 +340,49 @@ struct NTupleBufferControl
 
 private:
     // everywhere: bufnum is 1-based number of a buffer; buf_idx is 0-based index (bufnum == buf_idx + 1)
+
+
+    int // returns positive (1-based number) on success, 0 if no data, negative on error
+    start_reading_impl(
+            int* p_bufnum_prev, // pointer to previous bufnum (1- based, may be 0 if no previous data)
+                               // it will be released and  set to new bufnum
+            bool consume = false  // i.e. clear current
+    ){
+        ControlCodeT cco = cco_.load();
+        for(;;){
+            ControlCodeT new_cco = cco;
+            ControlCodeT cur_bufnum = get_current(new_cco);
+            if(cur_bufnum == 0){
+                return 0; // no data
+            }
+
+            if(p_bufnum_prev != nullptr && dec_ref(new_cco, *p_bufnum_prev) < 0){
+                return -3; // count overrun
+            }
+
+            if(consume){
+                set_current(new_cco, 0);
+            }else{
+                if(inc_ref(new_cco, cur_bufnum) < 0){
+                    return -2; // count overrun
+                }
+            }
+
+            YELD_ntuplebuf
+
+            if(cco_.compare_exchange_strong(cco, new_cco)){ //  weak would be sufficient?
+                if(p_bufnum_prev != nullptr){
+                    *p_bufnum_prev = (int)cur_bufnum;
+                }
+                return (int)cur_bufnum;
+            }
+        }
+
+        return -100;// unreachable (calm compiler warning)
+    }
+
+
+
 
     int  // negativ if invalid; otherwise bufnum itself (may be 0 if no data)
     bufnum_valid(int bufnum){
