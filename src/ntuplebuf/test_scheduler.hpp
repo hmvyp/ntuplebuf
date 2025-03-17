@@ -17,37 +17,6 @@ struct ShedAlgorithmIface{
     virtual ~ShedAlgorithmIface(){}
 };
 
-/*
-int num_of_ones(unsigned mask){
-    int cur_numOf1 = -1;
-    for(int i = 0; i != sizeof(mask) * 8; ++i){
-        if((((decltype(mask))1 << i) & mask) == 0){
-            continue;
-        }
-
-        cur_numOf1++;
-    }
-
-    return cur_numOf1 + 1;
-}
-
-int pos_in_mask(unsigned mask, int numOf1){
-    int cur_numOf1 = -1;
-    for(int i = 0; i != sizeof(mask) * 8; ++i){
-        if((((decltype(mask))1 << i) & mask) == 0){
-            continue;
-        }
-
-        cur_numOf1++;
-        if(cur_numOf1 == numOf1){
-            return i;
-        }
-    }
-
-    return -1;
-}
-*/
-
 struct SimpleRandomAlgorithm
     : public ShedAlgorithmIface
 {
@@ -85,16 +54,22 @@ public:
 
     SequentialThreadsSched(std::shared_ptr<ShedAlgorithmIface> alg)
     : alg_(alg)
-    {};
+    {
+        std::srand(1);
+    };
 
     void add_thread(){
+        std::unique_lock<decltype(mux_)> lk(mux_);
         cur_thread_num = num_of_threads_;
         threads_mask_ = threads_mask_ | ((decltype(threads_mask_))1 << num_of_threads_);
         num_of_threads_ ++;
     }
 
     void remove_thread(){
+        std::unique_lock<decltype(mux_)> lk(mux_);
         threads_mask_ = threads_mask_ & ~((decltype(threads_mask_))1 << cur_thread_num);
+        reshedule_ = true;
+        this->condvar_.notify_all();
     }
 
     void start(){
@@ -103,23 +78,26 @@ public:
         condvar_.notify_all();
     }
 
+    /*
+    void shutdown(){
+        std::unique_lock<decltype(mux_)> lk(mux_);
+        shutting_down_ = true;
+        condvar_.notify_all();
+    }
+    */
+
     void yeld(){
         std::unique_lock<decltype(mux_)> lk(mux_);
 
         for(;;){
-            if(next_active_thread_num_ == cur_thread_num){
-                prev_active_thread_num_ = next_active_thread_num_;
-                // calculate the thread scheduled on next yeld():
-                for(;;){
-                    auto tmp = alg_->choose(this->num_of_threads_, cur_thread_num);
+            if(next_active_thread_num_ == cur_thread_num || reshedule_){
+                reshedule_ = false;
+                prev_active_thread_num_ = cur_thread_num; // next_active_thread_num_;
 
-                    if( (threads_mask_ & ((decltype(threads_mask_))1 << tmp)) == 0){
-                        continue; // if chosen thread deleted
-                    }else{
-                        this->next_active_thread_num_ = tmp;
-                        break;
-                    }
-                }
+                // calculate the thread scheduled on next yeld():
+                reschedule();
+
+                // std::cout << "\n Thread " << cur_thread_num << " woke up" << "\n";
 
                 return;
             }
@@ -134,10 +112,35 @@ public:
 
 
 protected:
+
+
+    void reschedule(){
+        for(;;){
+            auto tmp = alg_->choose(this->num_of_threads_, cur_thread_num);
+
+            if(! tread_valid(tmp)){ // (threads_mask_ & ((decltype(threads_mask_))1 << tmp)) == 0){
+                continue; // if chosen thread deleted
+            }else{
+                this->next_active_thread_num_ = tmp;
+                break;
+            }
+        }
+    }
+
+    bool tread_valid(int thno){
+        if(thno < 0){
+            return false;
+        }
+        return  (threads_mask_ & ((decltype(threads_mask_))1 << thno)) != 0;
+    }
+
     int next_active_thread_num_ = -1;
     int prev_active_thread_num_ = -1;
     std::mutex mux_;
     std::condition_variable condvar_;
+
+    bool reshedule_ = false;
+    // bool shutting_down_ = false;
 
     int num_of_threads_ = 0;
 

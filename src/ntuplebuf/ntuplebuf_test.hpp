@@ -10,6 +10,7 @@
 #include <thread>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 
 #include "test_scheduler.hpp"
 
@@ -130,6 +131,8 @@ struct NtbTestMT
             cons_threads[i] = std::move(std::thread([=](){ this->consumer(i);}));
         }
 
+        sleep(1);
+
         producer();
 
         for(unsigned i = 0; i < NConsumers; ++i){
@@ -208,7 +211,7 @@ struct NtbTestMT
             {
                 p->count = ++count;
                 under_lock([=](){
-                    std::cout << "Producer:  data: " << count << "\n";
+                    std::cout << "Producer prepared  data: " << count << "\n";
                 });
             }
 
@@ -219,6 +222,10 @@ struct NtbTestMT
                     std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
                     });
                     break;
+                }else{
+                    under_lock([=](){
+                        std::cout << "Producer commited  data: " << count << "\n";
+                    });
                 }
             }
 
@@ -232,7 +239,7 @@ struct NtbTestMT
         // std::this_thread::sleep_for(std::chrono::milliseconds(TEST_RACES_ntuplebuf_ms * 3));
 
 
-        for(int i = 0; i < 20; ++i){
+        for(int i = 0; i < 10; ++i){
             YELD_ntuplebuf;
         }
 
@@ -289,7 +296,7 @@ int ntuplebuf_test(){
     typedef NtbTestMT<unsigned, 5, DataBase> T5;
     typedef NtbTestMT<unsigned, 1, Data> T1;
 
-    /*
+
     {
         T5 tst(20);
         tst.start();
@@ -311,16 +318,16 @@ int ntuplebuf_test(){
         T1 tst(50, T1::P_SIMPLE, T1::CONSUME);
         tst.start();
     }
-    */
+
 
     {
         //T1 tst(50, T1::COMMIT, T1::CONSUME);
 
         //T1 tst(1, T1::P_SIMPLE, T1::C_SIMPLE);
-        //T1 tst(1, T1::COMMIT, T1::C_SIMPLE);
+        //T1 tst(10, T1::COMMIT, T1::C_SIMPLE);
 
         //T1 tst(1, T1::P_SIMPLE, T1::CONSUME);
-         T1 tst(10, T1::COMMIT, T1::CONSUME);
+        T1 tst(10, T1::COMMIT, T1::CONSUME);
         tst.start();
     }
 
