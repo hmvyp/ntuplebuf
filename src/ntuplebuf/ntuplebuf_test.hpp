@@ -3,14 +3,26 @@
 
 
 // up to ... milliseconds sleep in selected points of the algorithm:
-#define TEST_RACES_ntuplebuf_ms 100
+//#define TEST_RACES_ntuplebuf_ms 100
 
-#include "ntuplebuf_dyn.hpp"
 #include <array>
 #include <iostream>
 #include <thread>
 #include <mutex>
 #include <string>
+
+#include "test_scheduler.hpp"
+
+using Shed = lf_test_utils::SequentialThreadsSched;
+using Alg = lf_test_utils::SimpleRandomAlgorithm;
+
+static std::unique_ptr<Shed> psched;
+
+#define YELD_ntuplebuf psched->yeld();
+
+
+#include "ntuplebuf_dyn.hpp"
+
 
 
 struct NtbTesBase{
@@ -77,7 +89,13 @@ struct NtbTestMT
 
     NtbTestMT(unsigned cycles, ProducerMode pm = P_SIMPLE, ConsumerMode cm = C_SIMPLE)
     : prod_cycles_(cycles), pm_(pm), cm_(cm)
-    {}
+    {
+        psched = std::unique_ptr<Shed>(new Shed(
+                std::shared_ptr<Alg>(new Alg(0.9)))
+        );
+
+
+    }
 
     ~NtbTestMT()
     {
@@ -120,6 +138,8 @@ struct NtbTestMT
     }
 
     void consumer(int consNo){
+        psched->add_thread();
+
         DataT* p = nullptr;
 
         while(!stop_.load()){
@@ -166,9 +186,15 @@ struct NtbTestMT
                 }
             }
         }
+
+        psched->remove_thread();
+
     }
 
     void producer(){
+        psched->add_thread();
+        psched->start();
+
         unsigned count = 10;
         DataT* p = nullptr;
 
@@ -203,17 +229,25 @@ struct NtbTestMT
         });
 
         // allow consumers to consume last message:
-        std::this_thread::sleep_for(std::chrono::milliseconds(TEST_RACES_ntuplebuf_ms * 3));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(TEST_RACES_ntuplebuf_ms * 3));
+
+
+        for(int i = 0; i < 20; ++i){
+            YELD_ntuplebuf;
+        }
 
         under_lock([=](){
         std::cout << "producer: stopping all\n ";
         });
 
+        psched->remove_thread();
 
         stop_.store(true);
+
     }
 
 private:
+
 
     ntuplebuf::NTupleBufferDynAllocTyped<ControlCodeT, NConsumers + 2, DataT> nbc; // = {sizeof(Data)};
 
@@ -236,6 +270,7 @@ int ntuplebuf_test(){
     ntuplebuf::NTupleBufferControl<int, 7> nbc_err_2;
 #   endif
 
+    /*
     int wb = 0;
     int rb = 0;
     nbc.start_writing(&wb);
@@ -250,10 +285,11 @@ int ntuplebuf_test(){
     nbc.start_reading(&rb);
     nbc.start_writing(&wb);
     nbc.start_reading(&rb);
-
+*/
     typedef NtbTestMT<unsigned, 5, DataBase> T5;
     typedef NtbTestMT<unsigned, 1, Data> T1;
 
+    /*
     {
         T5 tst(20);
         tst.start();
@@ -273,6 +309,18 @@ int ntuplebuf_test(){
         //T1 tst(50, T1::COMMIT, T1::CONSUME);
         //T1 tst(50, T1::COMMIT, T1::C_SIMPLE);
         T1 tst(50, T1::P_SIMPLE, T1::CONSUME);
+        tst.start();
+    }
+    */
+
+    {
+        //T1 tst(50, T1::COMMIT, T1::CONSUME);
+
+        //T1 tst(1, T1::P_SIMPLE, T1::C_SIMPLE);
+        //T1 tst(1, T1::COMMIT, T1::C_SIMPLE);
+
+        //T1 tst(1, T1::P_SIMPLE, T1::CONSUME);
+         T1 tst(10, T1::COMMIT, T1::CONSUME);
         tst.start();
     }
 

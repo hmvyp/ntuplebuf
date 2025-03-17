@@ -16,7 +16,7 @@ single integral atomic.
 #include <type_traits>
 #include <atomic>
 
-
+/*
 #if TEST_RACES_ntuplebuf_ms
 #   include <thread>
 #   include <cstdlib>
@@ -25,6 +25,9 @@ single integral atomic.
         std::rand() / (RAND_MAX / TEST_RACES_ntuplebuf_ms ) \
     ));
 #else
+*/
+
+#ifndef YELD_ntuplebuf
 #   define  YELD_ntuplebuf
 #endif
 
@@ -353,7 +356,8 @@ private:
             ControlCodeT new_cco = cco;
             ControlCodeT cur_bufnum = get_current(new_cco);
             if(cur_bufnum == 0){
-                return 0; // no data
+                YELD_ntuplebuf // duck!!!
+                return 0; // no data  // duck!!! maybe free p_bufnum_prev if 1= 0 ???
             }
 
             if(p_bufnum_prev != nullptr && dec_ref(new_cco, *p_bufnum_prev) < 0){
