@@ -92,7 +92,7 @@ struct NTupleBufferControl
     pop(
            int* p_bufnum_prev // pointer to previous bufnum (1- based, may be 0 if no previous data)
     ){
-        return start_reading_impl(nullptr, true);
+        return start_reading_impl(p_bufnum_prev, true);
     }
 
 
@@ -355,10 +355,13 @@ private:
         for(;;){
             ControlCodeT new_cco = cco;
             ControlCodeT cur_bufnum = get_current(new_cco);
+
+            /* removed (cause bug in pop())
             if(cur_bufnum == 0){
-                YELD_ntuplebuf // duck!!!
-                return 0; // no data  // duck!!! maybe free p_bufnum_prev if 1= 0 ???
+                YELD_ntuplebuf
+                return 0; // no data  // maybe free p_bufnum_prev if 1= 0 ???
             }
+            */
 
             if(p_bufnum_prev != nullptr && dec_ref(new_cco, *p_bufnum_prev) < 0){
                 return -3; // count overrun

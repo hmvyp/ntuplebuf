@@ -85,7 +85,8 @@ struct NtbTestMT
     enum ConsumerMode{
         C_SIMPLE,
         FREE,
-        CONSUME
+        CONSUME,
+        POP
     };
 
     NtbTestMT(unsigned cycles, ProducerMode pm = P_SIMPLE, ConsumerMode cm = C_SIMPLE)
@@ -146,7 +147,7 @@ struct NtbTestMT
         DataT* p = nullptr;
 
         while(!stop_.load()){
-            auto res = nbc.start_reading(&p);
+            auto res = (cm_ == POP)? nbc.pop(&p) : nbc.start_reading(&p);
             if(res < 0){
                 under_lock([=](){
                 std::cout << "** Read error consNo: " << consNo << "  error: " << res << "\n";
@@ -177,6 +178,7 @@ struct NtbTestMT
                     res = nbc.consume(&p);
                     break;
                 case C_SIMPLE:
+                case POP:
                 default:
                     break;
                 }
@@ -296,7 +298,7 @@ int ntuplebuf_test(){
     typedef NtbTestMT<unsigned, 5, DataBase> T5;
     typedef NtbTestMT<unsigned, 1, Data> T1;
 
-
+/*
     {
         T5 tst(20);
         tst.start();
@@ -311,11 +313,11 @@ int ntuplebuf_test(){
         T5 tst(20, T5::COMMIT, T5::FREE);
         tst.start();
     }
-
+ */
     {
         //T1 tst(50, T1::COMMIT, T1::CONSUME);
-        //T1 tst(50, T1::COMMIT, T1::C_SIMPLE);
-        T1 tst(50, T1::P_SIMPLE, T1::CONSUME);
+        T1 tst(20, T1::COMMIT, T1::C_SIMPLE);
+        //T1 tst(50, T1::P_SIMPLE, T1::CONSUME);
         tst.start();
     }
 
@@ -328,6 +330,12 @@ int ntuplebuf_test(){
 
         //T1 tst(1, T1::P_SIMPLE, T1::CONSUME);
         T1 tst(10, T1::COMMIT, T1::CONSUME);
+        tst.start();
+    }
+
+
+    {
+        T1 tst(10, T1::COMMIT, T1::POP);
         tst.start();
     }
 

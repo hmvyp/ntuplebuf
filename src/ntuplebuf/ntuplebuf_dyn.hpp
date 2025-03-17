@@ -46,6 +46,15 @@ struct NTupleBufferDynAlloc
         return res;
     }
 
+    errcode_t pop(void** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
+        int bufnum = ptr2bufnum(*pptr);
+        auto res = er(control.pop(&bufnum));
+        if(res >= 0){
+            *pptr = bufnum2ptr(bufnum);
+        }
+        return res;
+    }
+
     errcode_t free(void** pptr){
         int bufnum = ptr2bufnum(*pptr);
         auto res = er(control.free(&bufnum));
@@ -131,6 +140,10 @@ struct NTupleBufferDynAllocTyped
 
     errcode_t start_reading(DataT** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
         return Base::start_reading((void**)pptr);
+    }
+
+    errcode_t pop(DataT** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
+        return Base::pop((void**)pptr);
     }
 
     errcode_t free(DataT** pptr){
