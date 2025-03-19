@@ -22,6 +22,14 @@ template<typename ControlCodeT, unsigned NBUFS>
 struct NTupleBufferDynAlloc
 {
     typedef int errcode_t;
+    typedef  NTupleBufferControl<ControlCodeT, NBUFS> ControlCode;
+    typedef typename ControlCode::Transaction CCTransaction;
+
+    struct TypelessTransacion{
+      errcode_t errcode;
+      void* old_buf;
+      void* new_buf;
+    };
 
     NTupleBufferDynAlloc(size_t data_size)
         : data_size_(data_size) // size of one buffer as passed to ctor
@@ -91,6 +99,36 @@ struct NTupleBufferDynAlloc
         return res;
     }
 
+
+    TypelessTransacion start_transaction(){
+        CCTransaction tr = control.start_transaction();
+        TypelessTransacion ret = {
+                tr.errcode,
+                bufnum2ptr(tr.old_buf),
+                bufnum2ptr(tr.new_buf),
+        };
+
+        return ret;
+    }
+
+    errcode_t commit_transaction(TypelessTransacion& tra, bool force){
+        if(tra.errcode != 0){
+            return -91;
+        }
+
+        CCTransaction cctra = {
+                0,
+                ptr2bufnum(tra.old_buf),
+                ptr2bufnum(tra.new_buf)
+        };
+
+        int res = control.commit_transaction(cctra, force);
+
+        return res;
+    }
+
+
+
 protected:
 
     errcode_t er(int fr){return std::min(0, fr);}
@@ -108,7 +146,7 @@ protected:
 
     size_t data_size_;
     size_t sz1buf_; // size of 1 buffer
-    NTupleBufferControl<ControlCodeT, NBUFS> control;
+    ControlCode control;
     uint8_t* data_ = nullptr;
 };
 
@@ -123,6 +161,14 @@ struct NTupleBufferDynAllocTyped
 {
     typedef NTupleBufferDynAlloc<ControlCodeT, NBUFS> Base;
     typedef typename Base::errcode_t errcode_t;
+    typedef typename Base::TypelessTransacion TypelessTransacion;
+
+    struct TypedTransacion{
+      errcode_t errcode;
+      DataT* old_buf;
+      DataT* new_buf;
+    };
+
 
     NTupleBufferDynAllocTyped()
     : Base(sizeof(DataT))
@@ -134,38 +180,83 @@ struct NTupleBufferDynAllocTyped
 
     ~NTupleBufferDynAllocTyped(){
         for(unsigned i=0 ; i < NBUFS; ++i){
-            ((DataT*)(void*)(Base::data_ + i * Base::sz1buf_)) -> DataT::~DataT(); // placement destruct
+            (static_cast<DataT*>(
+                    static_cast<void*>(
+                            Base::data_ + i * Base::sz1buf_
+            ))) -> DataT::~DataT(); // placement destruct
         }
     }
 
     errcode_t start_reading(DataT** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
-        return Base::start_reading((void**)pptr);
+        return Base::start_reading(ppD2V(pptr));
     }
 
     errcode_t pop(DataT** pptr){ // pptr shall point to previous pointer to buffer (or nullptr)
-        return Base::pop((void**)pptr);
+        return Base::pop(ppD2V(pptr));
     }
 
     errcode_t free(DataT** pptr){
-        return Base::free((void**)pptr);
+        return Base::free(ppD2V(pptr));
     }
 
     errcode_t consume(DataT** pptr){
-        return Base::consume((void**)pptr);
+        return Base::consume(ppD2V(pptr));
     }
 
     errcode_t start_writing(DataT** pptr){
-        auto res = Base::start_writing((void**)pptr);
+        auto res = Base::start_writing(ppD2V(pptr));
         if(res > 0){
-            (*pptr) -> DataT::~DataT(); // destruct previous data in just allocated buffer
-            new(*pptr) DataT; // (placement) construct new data
+            reconstruct(*pptr);
         }
         return res;
     }
 
     errcode_t commit(DataT** pptr){
-        return Base::commit((void**)pptr);
+        return Base::commit(ppD2V(pptr));
     }
+
+    TypedTransacion start_transaction(){
+        TypelessTransacion tr = Base::start_transaction();
+        TypedTransacion ret = {
+                tr.errcode,
+                static_cast<DataT*>(tr.old_buf),
+                static_cast<DataT*>(tr.new_buf)
+        };
+
+        if(tr.errcode == 0){
+            // recreate object in newly allocated buffer:
+            this->reconstruct(ret.new_buf);
+        }
+
+        return ret;
+    }
+
+    errcode_t commit_transaction(TypedTransacion& tra, bool force){
+        if(tra.errcode != 0){
+            return -92;
+        }
+
+        TypelessTransacion tr = {
+                tra.errcode,
+                tra.old_buf,
+                tra.new_buf,
+        };
+
+        int res = Base::commit_transaction(tr, force);
+
+        return res;
+    }
+
+
+private:
+    // the "function" just casts Data** to void** :
+    static void** ppD2V(DataT** ppd){return static_cast<void**>(static_cast<void*>(ppd));}
+
+    void reconstruct(DataT* pd){
+        pd -> DataT::~DataT(); // destruct previous data
+        new(pd) DataT; // (placement) construct new data
+    }
+
 };
 
 } // namespace

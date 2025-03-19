@@ -74,17 +74,10 @@ public:
 
     void start(){
         std::unique_lock<decltype(mux_)> lk(mux_);
-        this->next_active_thread_num_ = cur_thread_num;
+        reschedule();
         condvar_.notify_all();
     }
 
-    /*
-    void shutdown(){
-        std::unique_lock<decltype(mux_)> lk(mux_);
-        shutting_down_ = true;
-        condvar_.notify_all();
-    }
-    */
 
     void yeld(){
         std::unique_lock<decltype(mux_)> lk(mux_);

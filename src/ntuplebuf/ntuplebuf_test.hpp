@@ -20,7 +20,7 @@ using Alg = lf_test_utils::SimpleRandomAlgorithm;
 static std::unique_ptr<Shed> psched;
 
 #define YELD_ntuplebuf psched->yeld();
-
+// #define DBG_STATUS_ntuplebuf
 
 #include "ntuplebuf_dyn.hpp"
 
@@ -38,6 +38,7 @@ struct NtbTesBase{
 
 struct DataBase{
     unsigned count = 0;
+    std::string s{"this is string data"};
     static void printInstancesCounter(){};
 };
 
@@ -79,7 +80,8 @@ struct NtbTestMT
 {
     enum ProducerMode{
         P_SIMPLE,
-        COMMIT
+        COMMIT,
+        TRANSACT
     };
 
     enum ConsumerMode{
@@ -132,7 +134,7 @@ struct NtbTestMT
             cons_threads[i] = std::move(std::thread([=](){ this->consumer(i);}));
         }
 
-        sleep(1);
+        sleep(1); // allow consumer threads to start (for deterministic test behavior)
 
         producer();
 
@@ -159,6 +161,9 @@ struct NtbTestMT
                         under_lock([=](){
                         std::cout << "consNo: " << consNo << " data: ";
                         std::cout << p->count;
+                        if(cm_ == POP){
+                            std::cout << " String received: " << p->s;
+                        }
                         std::cout << "\n";
                         });
                     }else{
@@ -204,33 +209,65 @@ struct NtbTestMT
         DataT* p = nullptr;
 
         for(unsigned i = 0; i < prod_cycles_; ++i){
-            auto res = nbc.start_writing(&p);
-            if(res < 0){
-                std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
-                break;
-            }
 
-            {
-                p->count = ++count;
-                under_lock([=](){
-                    std::cout << "Producer prepared  data: " << count << "\n";
-                });
-            }
+            if(pm_ == TRANSACT){
+                auto tra = nbc.start_transaction();
+                if(tra.errcode < 0){
+                    std::cout << "*** Producer: Transaction start error: " << "  error: "<< tra.errcode << "\n";
+                    break;
+                }
 
-            if(pm_ == COMMIT){
-                res = nbc.commit(&p);
-                if(res < 0){
+                tra.new_buf->count = ++count;
+                auto add_s = std::string("_") + std::to_string(count);
+                tra.new_buf->s = ((tra.old_buf != nullptr)?  tra.old_buf->s : std::string()) + add_s;
+
+                auto comm_res = nbc.commit_transaction(tra, false);
+
+                switch(comm_res){
+                case 0:
                     under_lock([=](){
-                    std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
+                        std::cout << "Producer: Transaction succeeds \n";
                     });
                     break;
-                }else{
+                case 1:
                     under_lock([=](){
-                        std::cout << "Producer commited  data: " << count << "\n";
+                        std::cout << "Producer: <==> Transaction collision \n";
+                    });
+                    break;
+               default:
+                     under_lock([=](){
+                        std::cout << "*** Producer: Transaction commit error" << comm_res << "\n";
                     });
                 }
-            }
 
+            }else{
+                auto res = nbc.start_writing(&p);
+                if(res < 0){
+                    std::cout << "** Write error Producer: " << "  error: "<< res << "\n";
+                    break;
+                }
+
+                {
+                    p->count = ++count;
+                    under_lock([=](){
+                        std::cout << "Producer prepared  data: " << count << "\n";
+                    });
+                }
+
+                if(pm_ == COMMIT){
+                    res = nbc.commit(&p);
+                    if(res < 0){
+                        under_lock([=](){
+                        std::cout << "** Read error Producer: " << "  error: "<< res << "\n";
+                        });
+                        break;
+                    }else{
+                        under_lock([=](){
+                            std::cout << "Producer commited  data: " << count << "\n";
+                        });
+                    }
+                }
+            }
         }
 
         under_lock([=](){
@@ -313,7 +350,7 @@ int ntuplebuf_test(){
         T5 tst(20, T5::COMMIT, T5::FREE);
         tst.start();
     }
- */
+
     {
         //T1 tst(50, T1::COMMIT, T1::CONSUME);
         T1 tst(20, T1::COMMIT, T1::C_SIMPLE);
@@ -333,9 +370,10 @@ int ntuplebuf_test(){
         tst.start();
     }
 
-
+*/
     {
-        T1 tst(10, T1::COMMIT, T1::POP);
+        // T1 tst(10, T1::COMMIT, T1::POP);
+        T1 tst(50, T1::TRANSACT, T1::POP);
         tst.start();
     }
 

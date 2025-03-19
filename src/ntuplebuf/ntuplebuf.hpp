@@ -49,6 +49,24 @@ template<typename ControlCodeT, unsigned NBUFS>  // ToDo:  + panic/warning handl
 
 struct NTupleBufferControl
 {
+private:
+
+
+#ifdef DBG_STATUS_ntuplebuf
+    void PRINT_CSTATUS_ntuplebuf(const char* headstr, ControlCodeT cc){
+        std::cout << headstr << " Current: " << this->get_current(cc) << " buf(count):";
+        for(unsigned i =0; i < NBUFS; ++i){
+            std::cout << "  " << (i + 1) << "(" << this->bufcount(cc, i + 1) << ")";
+        }
+
+        std::cout << "\n";
+    }
+#else
+#   define  PRINT_CSTATUS_ntuplebuf(headstr, cc)
+#endif
+
+
+public:
     using CCodeT = ControlCodeT;
 
     enum: ControlCodeT{
@@ -75,8 +93,8 @@ struct NTupleBufferControl
 
    struct Transaction {
         int errcode;
-        ControlCodeT old_buf;
-        ControlCodeT new_buf;
+        int old_buf;
+        int new_buf;
     };
 
 
@@ -102,7 +120,7 @@ struct NTupleBufferControl
     // free() call is not necessary.
     int // returns new reference count value (>= 0) or negative on error
     free(
-            int* p_bufnum // valid pointer to bufnum (to release); may point to 0 (no data);
+            int* p_bufnum // valiPRINT_CSTATUS_ntuplebufd pointer to bufnum (to release); may point to 0 (no data);
                           // will be set to 0 (no data) on success
     ){
         if(p_bufnum == nullptr){
@@ -238,20 +256,34 @@ struct NTupleBufferControl
             int old_bufnum = get_current(new_cco);
             int new_bufnum = find_new(new_cco);
             if(new_bufnum < 1){
-                rett.errcode = -35; // not found
+                rett.errcode = -80; // not found
                 return rett;
             }
 
-            if(inc_ref(new_cco, new_bufnum) < 0 ||  inc_ref(new_cco, old_bufnum < 0)){
-                return -2; // count underrun
+            std::cout
+                        << "  new buf allocated:" << new_bufnum << "/" <<  this->bufcount(new_cco, new_bufnum)
+                        << "\n";
+
+            if(inc_ref(new_cco, new_bufnum) < 0 ||  inc_ref(new_cco, old_bufnum) < 0){
+                rett.errcode = -81;
+                return rett;
             }
 
             YELD_ntuplebuf
+
+#           ifdef DBG_STATUS_ntuplebuf
+            std::cout
+                        <<  "T start:  old buf " << old_bufnum << "/" <<  this->bufcount(new_cco, old_bufnum)
+                        << "  new buf " << new_bufnum << "/" <<  this->bufcount(new_cco, new_bufnum)
+                        << "\n";
+#           endif
 
             if(cco_.compare_exchange_strong(cco, new_cco)){
                 rett.errcode = 0;
                 rett.old_buf = old_bufnum;
                 rett.new_buf = new_bufnum;
+
+                PRINT_CSTATUS_ntuplebuf("start_transaction", new_cco);
                 return rett;
             }
         }
@@ -267,34 +299,44 @@ struct NTupleBufferControl
         for(;;){
             ControlCodeT new_cco = cco;
 
-            int old_bufnum = get_current(new_cco);
+            int cur_bufnum = get_current(new_cco);
 
-            if(dec_ref(new_cco, tra.old_buf) < 0){ // release tra.old_buf unconditionally
-                return -2;
+            if(dec_ref(new_cco, tra.old_buf) < 0){ // release tra.old_buf (drop ownership)
+                return -83;
             }
 
-            if(old_bufnum != tra.old_buf){ // ABA impossible since tra.old_buf is referenced
-                if(force){
-                    if(dec_ref(new_cco, old_bufnum) < 0){// release old current if it != tra.old_buf
-                        return -2;
-                    }
-                }else{
-                    success = false;
-                }
+            if(!force && cur_bufnum != tra.old_buf){ // ABA impossible since tra.old_buf has been referenced
+                success = false;
             }
 
             if(success){
+                if(dec_ref(new_cco, cur_bufnum) < 0){ // release ex-current
+                    return -85;
+                }
                 set_current(new_cco, tra.new_buf); // keep new buffer referenced and set it as current
             }else{
                 // otherwise release new buffer (it is garbage on failure):
                 if(dec_ref(new_cco, tra.new_buf) < 0){
-                    return -2;
+                    return -86;
                 }
             }
 
             YELD_ntuplebuf
 
+#           ifdef DBG_STATUS_ntuplebuf
+            std::cout
+                    <<  "T commit:  old buf " << tra.old_buf << "/" <<  this->bufcount(new_cco, tra.old_buf)
+                    << "  new buf " << tra.new_buf << "/" <<  this->bufcount(new_cco, tra.new_buf)
+                    << "\n";
+#           endif
+
+
             if(cco_.compare_exchange_strong(cco, new_cco)){
+
+                PRINT_CSTATUS_ntuplebuf(
+                        success? "commit_transaction_succeeds" : "commit_transaction_failed",
+                        new_cco
+                );
                 return success? 0 : 1;
             }
         }
@@ -342,7 +384,9 @@ struct NTupleBufferControl
 
 
 private:
-    // everywhere: bufnum is 1-based number of a buffer; buf_idx is 0-based index (bufnum == buf_idx + 1)
+    // everywhere below:
+    // bufnum is 1-based number of a buffer;
+    // buf_idx is 0-based index (bufnum == buf_idx + 1)
 
 
     int // returns positive (1-based number) on success, 0 if no data, negative on error
@@ -367,6 +411,15 @@ private:
                 return -3; // count overrun
             }
 
+#           ifdef DBG_STATUS_ntuplebuf
+
+            int bpre = *p_bufnum_prev;
+            std::cout
+                    <<  "  prev " << bpre << "/" <<  this->bufcount(new_cco, bpre)
+                    << "  cur " << cur_bufnum << "/" <<  this->bufcount(new_cco, cur_bufnum)
+                    << "\n";
+#           endif
+
             if(consume){
                 set_current(new_cco, 0);
             }else{
@@ -381,6 +434,9 @@ private:
                 if(p_bufnum_prev != nullptr){
                     *p_bufnum_prev = (int)cur_bufnum;
                 }
+
+                PRINT_CSTATUS_ntuplebuf("start_reading", new_cco);
+
                 return (int)cur_bufnum;
             }
         }
@@ -396,11 +452,21 @@ private:
         return (bufnum < 0 || bufnum > (int)NBUFS)? -1 : bufnum;
     }
 
-    ControlCodeT get_count(ControlCodeT cco, int buf_idx){return (cco >> (buf_idx * count_bitsize)) & count_mask; }
+    ControlCodeT get_count(ControlCodeT cco, int buf_idx){
+        return (cco >> (buf_idx * count_bitsize)) & count_mask;
+    }
+
     void set_count(ControlCodeT& cco, int buf_idx, ControlCodeT val){
         int pos = buf_idx * count_bitsize;
         ControlCodeT m = count_mask << pos;
         cco = (cco & ~m) | (m & (val << pos));
+    }
+
+    int bufcount(ControlCodeT cco, int bufnum){
+        if(bufnum < 1){
+            return 0;
+        }
+        return get_count(cco, bufnum -1);
     }
 
     // the 2 functions get or set 1-based number of current buffer:
