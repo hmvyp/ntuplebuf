@@ -260,9 +260,11 @@ public:
                 return rett;
             }
 
+#           ifdef DBG_STATUS_ntuplebuf
             std::cout
                         << "  new buf allocated:" << new_bufnum << "/" <<  this->bufcount(new_cco, new_bufnum)
                         << "\n";
+#           endif
 
             if(inc_ref(new_cco, new_bufnum) < 0 ||  inc_ref(new_cco, old_bufnum) < 0){
                 rett.errcode = -81;
