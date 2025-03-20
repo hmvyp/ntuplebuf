@@ -211,33 +211,54 @@ struct NtbTestMT
         for(unsigned i = 0; i < prod_cycles_; ++i){
 
             if(pm_ == TRANSACT){
-                auto tra = nbc.start_transaction();
-                if(tra.errcode < 0){
-                    std::cout << "*** Producer: Transaction start error: " << "  error: "<< tra.errcode << "\n";
-                    break;
-                }
-
-                tra.new_buf->count = ++count;
+                bool error = false;
+                ++count;
                 auto add_s = std::string("_") + std::to_string(count);
-                tra.new_buf->s = ((tra.old_buf != nullptr)?  tra.old_buf->s : std::string()) + add_s;
 
-                auto comm_res = nbc.commit_transaction(tra, false);
+                for(int j = 0 ; j != 10; ++j){ // transaction attempts
+                    bool collision = false;
 
-                switch(comm_res){
-                case 0:
-                    under_lock([=](){
-                        std::cout << "Producer: Transaction succeeds \n";
-                    });
+                    auto tra = nbc.start_transaction();
+                    if(tra.errcode < 0){
+                        error = true;
+                        std::cout << "*** Producer: Transaction start error: " << "  error: "<< tra.errcode << "\n";
+                        break;
+                    }
+
+                    tra.new_buf->count = count;
+                    tra.new_buf->s = ((tra.old_buf != nullptr)?  tra.old_buf->s : std::string()) + add_s;
+
+                    auto comm_res = nbc.commit_transaction(tra, false);
+
+                    switch(comm_res){
+                    case 0:
+                        under_lock([=](){
+                            std::cout << "Producer: Transaction succeeds \n";
+                        });
+                        break;
+                    case 1:
+                        collision = true;
+
+                        under_lock([=](){
+                            std::cout << "Producer: <==> Transaction collision \n";
+                        });
+                        break;
+                    default:
+                        error = true;
+                        under_lock([=](){
+                            std::cout << "*** Producer: Transaction commit error" << comm_res << "\n";
+                        });
+                    }
+
+                    if(collision){
+                        continue;
+                    }else{
+                        break;
+                    }
+                } // for until transaction success success
+
+                if(error){
                     break;
-                case 1:
-                    under_lock([=](){
-                        std::cout << "Producer: <==> Transaction collision \n";
-                    });
-                    break;
-               default:
-                     under_lock([=](){
-                        std::cout << "*** Producer: Transaction commit error" << comm_res << "\n";
-                    });
                 }
 
             }else{
@@ -335,7 +356,6 @@ int ntuplebuf_test(){
     typedef NtbTestMT<unsigned, 5, DataBase> T5;
     typedef NtbTestMT<unsigned, 1, Data> T1;
 
-/*
     {
         T5 tst(20);
         tst.start();
@@ -370,7 +390,6 @@ int ntuplebuf_test(){
         tst.start();
     }
 
-*/
     {
         // T1 tst(10, T1::COMMIT, T1::POP);
         T1 tst(50, T1::TRANSACT, T1::POP);
